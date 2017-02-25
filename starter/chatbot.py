@@ -102,8 +102,7 @@ class Chatbot:
     def binarize(self):
       """Modifies the ratings matrix to make all of the ratings binary"""
       # Loop through the ratings and binarize based on overall average rating
-      rating_count = 0.0
-      rating_sum = 0.0
+      rating_count = rating_sum = 0.0
       for row, movie in enumerate(self.ratings):
         for col, user in enumerate(movie):
           if self.ratings[row][col] != 0:
@@ -118,22 +117,33 @@ class Chatbot:
             else:
               self.ratings[row][col] = -1
 
-
     def distance(self, u, v):
       """Calculates a given distance function between vectors u and v"""
-      # TODO: Implement the distance function between vectors u and v]
+      # Implement the distance function between vectors u and v]
       # Note: you can also think of this as computing a similarity measure
-
-      pass
-
+      # Use of cosine similarity measure, assumes u and v have equal length
+      num = den_u = den_v = 0.0
+      for idx, val in enumerate(u):
+        num += (u[idx] * v[idx])
+        den_u += math.pow(u[idx], 2)
+        den_v += math.pow(v[idx], 2)
+      return num / (math.sqrt(den_u) * math.sqrt(den_v))
 
     def recommend(self, u):
       """Generates a list of movies based on the input vector u using
       collaborative filtering"""
       # TODO: Implement a recommendation function that takes a user vector u
       # and outputs a list of movies recommended by the chatbot
-
-      pass
+      max_rxi = max_idx = 0.0
+      for i, movie in enumerate(self.ratings):
+        rxi = 0.0
+        for j, rxj in enumerate(u):
+          sij = self.distance(self.ratings[i], self.ratings[j])
+          rxi += (rxj * sij)
+        if rxi > max_rxi:
+          max_rxi = rxi
+          max_idx = i
+      return self.titles[max_idx]
 
 
     #############################################################################
