@@ -21,7 +21,7 @@ class Chatbot:
     # `moviebot` is the default chatbot. Change it to your chatbot's name       #
     #############################################################################
     def __init__(self, is_turbo=False):
-      self.name = 'moviebot'
+      self.name = 'pablo'
       self.is_turbo = is_turbo
       self.read_data()
 
@@ -35,7 +35,9 @@ class Chatbot:
       # TODO: Write a short greeting message                                      #
       #############################################################################
 
-      greeting_message = 'How can I help you?'
+      greeting_message = "Hi! I\'m Pablo! I\'m going to recommend a movie to you. "
+      greeting_message += "First I will ask you about your taste in movies. "
+      greeting_message += "Tell me about a movie that you have seen."
 
       #############################################################################
       #                             END OF YOUR CODE                              #
@@ -91,14 +93,30 @@ class Chatbot:
       # The values stored in each row i and column j is the rating for
       # movie i by user j
       self.titles, self.ratings = ratings()
+      self.binarize()
+
       reader = csv.reader(open('data/sentiment.txt', 'rb'))
       self.sentiment = dict(reader)
 
 
     def binarize(self):
       """Modifies the ratings matrix to make all of the ratings binary"""
-
-      pass
+      # Loop through the ratings and binarize based on overall average rating
+      rating_count = 0.0
+      rating_sum = 0.0
+      for row, movie in enumerate(self.ratings):
+        for col, user in enumerate(movie):
+          if self.ratings[row][col] != 0:
+            rating_sum += self.ratings[row][col]
+            rating_count += 1
+      rating_avg = rating_sum / rating_count
+      for row, movie in enumerate(self.ratings):
+        for col, user in enumerate(movie):
+          if self.ratings[row][col] != 0:
+            if self.ratings[row][col] >= rating_avg:
+              self.ratings[row][col] = 1
+            else:
+              self.ratings[row][col] = -1
 
 
     def distance(self, u, v):
