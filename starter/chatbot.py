@@ -8,11 +8,14 @@
 ######################################################################
 import csv
 import math
+import re
 
 import numpy as np
 
 from movielens import ratings
 from random import randint
+
+articles = "a|an|the|la"
 
 class Chatbot:
     """Simple class to implement the chatbot for PA 6."""
@@ -24,6 +27,10 @@ class Chatbot:
       self.name = 'pablo'
       self.is_turbo = is_turbo
       self.read_data()
+      self.user_vec = []
+      self.rec_list = []
+      self.user_cont_flag = True
+      self.rec_list_idx = 0;
 
     #############################################################################
     # 1. WARM UP REPL
@@ -51,7 +58,7 @@ class Chatbot:
       # TODO: Write a short farewell message                                      #
       #############################################################################
 
-      goodbye_message = 'Have a nice day!'
+      goodbye_message = 'Thank you for hanging out with me! Stay in touch! Goodbye!'
 
       #############################################################################
       #                             END OF YOUR CODE                              #
@@ -75,12 +82,107 @@ class Chatbot:
       # calling other functions. Although modular code is not graded, it is       #
       # highly recommended                                                        #
       #############################################################################
-      if self.is_turbo == True:
-        response = 'processed %s in creative mode!!' % input
-      else:
-        response = 'processed %s in starter mode' % input
+    #   if self.is_turbo == True:
+    #     response = 'processed %s in creative mode!!' % input
+    #   else:
+    #     response = 'processed %s in starter mode' % input
 
+      if not self.user_cont_flag:
+        if re.findall("yes", input.lower()):
+          return self.print_recommendation() # Print another recommendation
+        if re.findall("no", input.lower()):
+          self.user_cont_flag = True
+          return "Ok. Tell me about some more movies that you have seen in order for me to provide you with better recommendations."
+
+      movie = re.findall("\"(.+?)\"", input)
+      sentiment = self.get_sentiment(input)
+      if not movie:
+        if sentiment == "neg":
+          return "I want to hear more about movies! Tell me about another movie you have seen."
+        return "Sorry, I don't understand. Tell me about a movie that you have seen."
+      if len(movie) > 1:
+        return "Please tell me about one movie at a time. Go ahead."
+      response = ""
+      movie = movie[0]
+      movie_idx = self.get_movie(movie)
+      if movie_idx == -1:
+        return "I'm sorry, I haven't heard of that movie. Tell me about another movie you have seen."
+      if not sentiment:
+        return "I'm sorry, I'm not quite sure if you liked \"" + movie + "\". Tell me more about \"" + movie + "\"."
+
+      if sentiment == "pos":
+        self.user_vec.append([movie_idx, 1.0])
+        response = "You liked \"" + movie + "\". Thank you!"
+      else:
+        self.user_vec.append([movie_idx, -1.0])
+        response = "You did not like \"" + movie + "\". Thank you!"
+
+      if len(self.user_vec) % 5 == 0: # Provide new recs every 5 data points
+        self.rec_list_idx = 0
+        self.rec_list = self.recommend(self.user_vec)
+        response += " That's enough for me to make a recommendation. "
+        response += self.print_recommendation()
+      else:
+        response += " Tell me about another movie you have seen."
       return response
+
+
+    def print_recommendation(self):
+      movie = self.titles[self.rec_list[self.rec_list_idx][0]][0]
+      response = "I suggest you watch \"" + movie + "\". Would you like to hear another recommendation? (Or enter :quit if you're done.)"
+      self.rec_list_idx += 1
+      self.user_cont_flag = False
+      return response
+
+
+    def get_movie(self, movie):
+      # Get index of movie in titles array, -1 if absent
+      if not movie or len(movie.split()) == 0:
+        return -1
+      adj_movie = movie
+      if re.findall(articles, movie.split()[0].lower()):
+        start_article = movie.split()[0]
+        adj_movie = movie.replace(start_article + " ", "")
+        adj_movie += ", " + start_article
+      for idx,title in enumerate(self.titles):
+        if movie in title[0] or adj_movie in title[0]:
+          return idx
+      return -1
+
+
+    def get_sentiment(self, input):
+      # First remove movie title from string
+      movie = re.findall("(\".+?\")", input)
+      if movie:
+        input = input.replace(movie[0], '')
+      input = input.split()
+      # Get pos and neg scores
+      pos = neg = 0.0
+      for word in input:
+        word_sentiment = self.get_word_sentiment(word)
+        if word_sentiment:
+          if word_sentiment == "pos":
+            pos += 1
+          else:
+            neg += 1
+      # Return input's overall sentiment
+      if pos > neg:
+        return "pos"
+      elif neg > pos:
+        return "neg"
+      else:
+        return None
+
+
+    def get_word_sentiment(self, word):
+      # Get sentiment for word, checking for word variants
+      if word in self.sentiment:
+        return self.sentiment[word]
+      if word[-1] == "d" and word[:-1] in self.sentiment:
+        return self.sentiment[word[:-1]]
+      if word[-2:] == "ed" and word[:-2] in self.sentiment:
+        return self.sentiment[word[:-2]]
+      return None
 
 
     #############################################################################
@@ -94,7 +196,6 @@ class Chatbot:
       # movie i by user j
       self.titles, self.ratings = ratings()
       self.binarize()
-
       reader = csv.reader(open('data/sentiment.txt', 'rb'))
       self.sentiment = dict(reader)
 
@@ -102,48 +203,53 @@ class Chatbot:
     def binarize(self):
       """Modifies the ratings matrix to make all of the ratings binary"""
       # Loop through the ratings and binarize based on overall average rating
-      rating_count = rating_sum = 0.0
-      for row, movie in enumerate(self.ratings):
-        for col, user in enumerate(movie):
-          if self.ratings[row][col] != 0:
-            rating_sum += self.ratings[row][col]
-            rating_count += 1
-      rating_avg = rating_sum / rating_count
-      for row, movie in enumerate(self.ratings):
-        for col, user in enumerate(movie):
-          if self.ratings[row][col] != 0:
-            if self.ratings[row][col] >= rating_avg:
-              self.ratings[row][col] = 1
-            else:
-              self.ratings[row][col] = -1
+      rating_sum = np.sum(self.ratings)
+      rating_count = np.count_nonzero(self.ratings)
+      rating_avg = (1.0 * rating_sum) / rating_count
+
+      def binary_transform(x, rating_avg):
+        if x == 0.0:
+          return 0.0
+        elif x >= rating_avg:
+          return 1.0
+        else:
+          return -1.0
+
+      btransform = np.vectorize(binary_transform, otypes=[np.float])
+      self.ratings = btransform(self.ratings, rating_avg)
 
     def distance(self, u, v):
       """Calculates a given distance function between vectors u and v"""
       # Implement the distance function between vectors u and v]
       # Note: you can also think of this as computing a similarity measure
       # Use of cosine similarity measure, assumes u and v have equal length
-      num = den_u = den_v = 0.0
-      for idx, val in enumerate(u):
-        num += (u[idx] * v[idx])
-        den_u += math.pow(u[idx], 2)
-        den_v += math.pow(v[idx], 2)
+      num = np.dot(u,v)
+      den_u = np.sum(u**2)
+      den_v = np.sum(v**2)
+      if den_u == 0.0 or den_v == 0.0:
+        return 0.0
       return num / (math.sqrt(den_u) * math.sqrt(den_v))
+
 
     def recommend(self, u):
       """Generates a list of movies based on the input vector u using
       collaborative filtering"""
-      # TODO: Implement a recommendation function that takes a user vector u
+      # Implement a recommendation function that takes a user vector u
       # and outputs a list of movies recommended by the chatbot
-      max_rxi = max_idx = 0.0
+      rec_list = []
       for i, movie in enumerate(self.ratings):
         rxi = 0.0
-        for j, rxj in enumerate(u):
+        for tup in u:
+          j = tup[0]
+          rxj = tup[1]
+          if i == j: # Skip movies user watched already
+            continue
           sij = self.distance(self.ratings[i], self.ratings[j])
           rxi += (rxj * sij)
-        if rxi > max_rxi:
-          max_rxi = rxi
-          max_idx = i
-      return self.titles[max_idx]
+        movie_rank = [i, rxi]
+        rec_list.append(movie_rank)
+      rec_list = sorted(rec_list, key=lambda x:x[1], reverse = True)
+      return rec_list
 
 
     #############################################################################
