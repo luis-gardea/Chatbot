@@ -15,7 +15,10 @@ import numpy as np
 from movielens import ratings
 from random import randint
 
+DATA_POINTS = 5
+
 articles = "a|an|the|la"
+negation_terms = "not|never|n't"
 
 class Chatbot:
     """Simple class to implement the chatbot for PA 6."""
@@ -87,21 +90,23 @@ class Chatbot:
     #   else:
     #     response = 'processed %s in starter mode' % input
 
+      # If recommendation just given, check answer whether user wants another movie
       if not self.user_cont_flag:
         if re.findall("yes", input.lower()):
-          return self.print_recommendation() # Print another recommendation
-        if re.findall("no", input.lower()):
+          return self.print_recommendation()
+        else:
           self.user_cont_flag = True
           return "Ok. Tell me about some more movies that you have seen in order for me to provide you with better recommendations."
 
       movie = re.findall("\"(.+?)\"", input)
       sentiment = self.get_sentiment(input)
       if not movie:
-        if sentiment == "neg":
+        if sentiment == "neg": # Guess user doesn't want to continue
           return "I want to hear more about movies! Tell me about another movie you have seen."
         return "Sorry, I don't understand. Tell me about a movie that you have seen."
       if len(movie) > 1:
         return "Please tell me about one movie at a time. Go ahead."
+
       response = ""
       movie = movie[0]
       movie_idx = self.get_movie(movie)
@@ -117,7 +122,7 @@ class Chatbot:
         self.user_vec.append([movie_idx, -1.0])
         response = "You did not like \"" + movie + "\". Thank you!"
 
-      if len(self.user_vec) % 5 == 0: # Provide new recs every 5 data points
+      if len(self.user_vec) % DATA_POINTS == 0: # Provide new recs every 5 data points
         self.rec_list_idx = 0
         self.rec_list = self.recommend(self.user_vec)
         response += " That's enough for me to make a recommendation. "
@@ -128,7 +133,15 @@ class Chatbot:
 
 
     def print_recommendation(self):
+      # Print movie recommendation, parse title correctly
       movie = self.titles[self.rec_list[self.rec_list_idx][0]][0]
+      remove_vals = re.findall("(\(.*?\))", movie)
+      for val in remove_vals:
+        movie = movie.replace(val, "").rstrip()
+      article_val = re.findall(articles, movie.split()[-1].lower())
+      if article_val and re.findall(", " + article_val[-1].capitalize(), movie):
+        movie = movie.replace(", " + article_val[-1].capitalize(), "")
+        movie = article_val[-1].capitalize() + " " + movie
       response = "I suggest you watch \"" + movie + "\". Would you like to hear another recommendation? (Or enter :quit if you're done.)"
       self.rec_list_idx += 1
       self.user_cont_flag = False
@@ -158,13 +171,22 @@ class Chatbot:
       input = input.split()
       # Get pos and neg scores
       pos = neg = 0.0
+      negation = False
       for word in input:
         word_sentiment = self.get_word_sentiment(word)
         if word_sentiment:
-          if word_sentiment == "pos":
+          if negation:
+            if word_sentiment == "pos":
+              neg += 1
+            else:
+              pos += 1
+            negation = False
+          elif word_sentiment == "pos":
             pos += 1
           else:
             neg += 1
+        if re.findall(negation_terms, word.lower()):
+          negation = True
       # Return input's overall sentiment
       if pos > neg:
         return "pos"
@@ -175,7 +197,7 @@ class Chatbot:
 
 
     def get_word_sentiment(self, word):
-      # Get sentiment for word, checking for word variants
+      # Get sentiment for word, checking for word variants and negatives
       if word in self.sentiment:
         return self.sentiment[word]
       if word[-1] == "d" and word[:-1] in self.sentiment:
@@ -242,11 +264,11 @@ class Chatbot:
         for tup in u:
           j = tup[0]
           rxj = tup[1]
-          if i == j: # Skip movies user watched already
+          if i == j: # Skip movies in user_vec
             continue
           sij = self.distance(self.ratings[i], self.ratings[j])
           rxi += (rxj * sij)
-        movie_rank = [i, rxi]
+        movie_rank = [i, rxi] # Store movie index and rating
         rec_list.append(movie_rank)
       rec_list = sorted(rec_list, key=lambda x:x[1], reverse = True)
       return rec_list
