@@ -11,14 +11,19 @@ import math
 import re
 
 import numpy as np
-
+import string
 from movielens import ratings
 from random import randint
+from PorterStemmer import PorterStemmer
 
 DATA_POINTS = 5
 
-articles = "a|an|the|la"
+epsilon = 1e-4
+articles = "a|an|the|la|el"
 negation_terms = "not|never|n't"
+strong_sentiment = ['love','hate','favorite','amazing','terrible','worst']
+intensifiers = "very|extremely|really|too|totally|super"
+exclude = set(string.punctuation)
 
 class Chatbot:
     """Simple class to implement the chatbot for PA 6."""
@@ -29,11 +34,15 @@ class Chatbot:
     def __init__(self, is_turbo=False):
       self.name = 'pablo'
       self.is_turbo = is_turbo
+      self.stemmer = PorterStemmer()
+      for i,word in enumerate(strong_sentiment):
+        strong_sentiment[i] = self.stemmer.stem(word)
       self.read_data()
       self.user_vec = []
       self.rec_list = []
       self.user_cont_flag = True
       self.rec_list_idx = 0;
+      
 
     #############################################################################
     # 1. WARM UP REPL
@@ -91,6 +100,8 @@ class Chatbot:
     #     response = 'processed %s in starter mode' % input
 
       # If recommendation just given, check answer whether user wants another movie
+      # return self.get_movie(input)
+
       if not self.user_cont_flag:
         if re.findall("yes", input.lower()):
           return self.print_recommendation()
@@ -115,11 +126,19 @@ class Chatbot:
       if not sentiment:
         return "I'm sorry, I'm not quite sure if you liked \"" + movie + "\". Tell me more about \"" + movie + "\"."
 
+      # If movie has already been rated and sentiment is found, then we can safely remove it from the vector
+      # and it will be added in with the updated rating, but not increase vector size
+      if (movie_idx, 1.0) in self.user_vec:
+        self.user_vec.remove( (movie_idx, 1.0) )
+      elif (movie_idx, -1.0) in self.user_vec:
+        self.user_vec.remove( (movie_idx, -1.0) )
+        
+
       if sentiment == "pos":
-        self.user_vec.append([movie_idx, 1.0])
+        self.user_vec.append( (movie_idx, 1.0) )
         response = "You liked \"" + movie + "\". Thank you!"
       else:
-        self.user_vec.append([movie_idx, -1.0])
+        self.user_vec.append( (movie_idx, -1.0) )
         response = "You did not like \"" + movie + "\". Thank you!"
 
       if len(self.user_vec) % DATA_POINTS == 0: # Provide new recs every 5 data points
@@ -133,6 +152,9 @@ class Chatbot:
 
 
     def print_recommendation(self):
+      if self.rec_list_idx >= len(self.rec_list):
+        self.user_cont_flag = True
+        return "I need more information to provide new recommendations. Tell me about another movie you have seen." 
       # Print movie recommendation, parse title correctly
       movie = self.titles[self.rec_list[self.rec_list_idx][0]][0]
       remove_vals = re.findall("(\(.*?\))", movie)
@@ -170,27 +192,31 @@ class Chatbot:
         input = input.replace(movie[0], '')
       input = input.split()
       # Get pos and neg scores
-      pos = neg = 0.0
+      # pos = neg = 0.0
+      sentiment = 0
       negation = False
+      intense = False
       for word in input:
         word_sentiment = self.get_word_sentiment(word)
+        print word, word_sentiment
         if word_sentiment:
+          if intense:
+            word_sentiment *= 2
+            intense = False
           if negation:
-            if word_sentiment == "pos":
-              neg += 1
-            else:
-              pos += 1
+            sentiment -= word_sentiment
             negation = False
-          elif word_sentiment == "pos":
-            pos += 1
           else:
-            neg += 1
+            sentiment += word_sentiment
+
         if re.findall(negation_terms, word.lower()):
           negation = True
+        if re.findall(intensifiers, word.lower()):
+          insense = True
       # Return input's overall sentiment
-      if pos > neg:
+      if sentiment > epsilon:
         return "pos"
-      elif neg > pos:
+      elif sentiment < -epsilon:
         return "neg"
       else:
         return None
@@ -198,12 +224,24 @@ class Chatbot:
 
     def get_word_sentiment(self, word):
       # Get sentiment for word, checking for word variants and negatives
-      if word in self.sentiment:
-        return self.sentiment[word]
-      if word[-1] == "d" and word[:-1] in self.sentiment:
-        return self.sentiment[word[:-1]]
-      if word[-2:] == "ed" and word[:-2] in self.sentiment:
-        return self.sentiment[word[:-2]]
+      coeff = 1
+      if len(re.findall('!', word)) > 1:
+        coeff *= 2
+      stemmed_word = ''.join(ch for ch in word if ch not in exclude)
+
+      stemmed_word = self.stemmer.stem(stemmed_word)
+      if stemmed_word in strong_sentiment:
+        coeff *= 2
+
+      if stemmed_word in self.sentiment:
+        if self.sentiment[stemmed_word] == "pos":
+          return 1*coeff
+        else:
+          return -1*coeff
+      # if word[-1] == "d" and word[:-1] in self.sentiment:
+      #   return self.sentiment[word[:-1]]
+      # if word[-2:] == "ed" and word[:-2] in self.sentiment:
+      #   return self.sentiment[word[:-2]]
       return None
 
 
@@ -219,7 +257,12 @@ class Chatbot:
       self.titles, self.ratings = ratings()
       self.binarize()
       reader = csv.reader(open('data/sentiment.txt', 'rb'))
-      self.sentiment = dict(reader)
+      sentiment = dict(reader)
+      self.sentiment = {}
+      # added stemming for sentiment keywords
+      for key, val in sentiment.items():
+        stemmed_key = self.stemmer.stem(key)
+        self.sentiment[stemmed_key] = val
 
 
     def binarize(self):
@@ -295,6 +338,9 @@ class Chatbot:
       Remember: in the starter mode, movie names will come in quotation marks and
       expressions of sentiment will be simple!
       Write here the description for your own chatbot!
+
+      Our chatbox so far has more fine-grained sentiment extraction, it handles strong sentiment words,
+      intensifiers, and exclamation marks.
       """
 
 

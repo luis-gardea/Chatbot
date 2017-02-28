@@ -1,1 +1,5 @@
 data/*
+PorterStemmer.pyc
+chatbot.pyc
+movielens.pyc
+
