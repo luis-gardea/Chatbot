@@ -34,14 +34,21 @@ class Chatbot:
     def __init__(self, is_turbo=False):
       self.name = 'pablo'
       self.is_turbo = is_turbo
+
       self.stemmer = PorterStemmer()
       for i,word in enumerate(strong_sentiment):
         strong_sentiment[i] = self.stemmer.stem(word)
+
       self.read_data()
       self.user_vec = []
       self.rec_list = []
       self.user_cont_flag = True
       self.rec_list_idx = 0;
+
+      self.disambiguate_title_flag = False
+      self.disambiguate_list = []
+      self.disambiguate_sentiment = ""
+      self.disambiguated_movie = ""
       
 
     #############################################################################
@@ -99,9 +106,24 @@ class Chatbot:
     #   else:
     #     response = 'processed %s in starter mode' % input
 
-      # If recommendation just given, check answer whether user wants another movie
-      # return self.get_movie(input)
+      if self.disambiguate_title_flag:
+        if input.isdigit():
+          index = int(input)
+          if index >= 0 and index < len(self.disambiguate_list):
+            return self.disambiguate_movie(index)
+          else:
+            return "This value was not in the list. " + self.print_disambiguate_prompt()
+        else:
+          if input.lower() == "none":
+            self.disambiguate_title_flag = False
+            self.disambiguate_list = []
+            self.disambiguate_sentiment = ""
+            self.disambiguated_movie = ""
+            return "Ok. Tell me about another movie you have seen."
+          else:
+            return self.print_disambiguate_prompt()
 
+      # If recommendation just given, check answer whether user wants another movie
       if not self.user_cont_flag:
         if re.findall("yes", input.lower()):
           return self.print_recommendation()
@@ -118,14 +140,27 @@ class Chatbot:
       if len(movie) > 1:
         return "Please tell me about one movie at a time. Go ahead."
 
-      response = ""
       movie = movie[0]
-      movie_idx = self.get_movie(movie)
-      if movie_idx == -1:
-        return "I'm sorry, I haven't heard of that movie. Tell me about another movie you have seen."
       if not sentiment:
         return "I'm sorry, I'm not quite sure if you liked \"" + movie + "\". Tell me more about \"" + movie + "\"."
 
+      movie_idx = -1
+      movie_idx_list = self.get_movie(movie)
+      if len(movie_idx_list) == 0:
+        return "I'm sorry, I haven't heard of that movie. Tell me about another movie you have seen."
+      elif len(movie_idx_list) == 1:
+        movie_idx = movie_idx_list[0]
+      else:
+        self.disambiguate_title_flag = True
+        self.disambiguate_list = movie_idx_list
+        self.disambiguate_sentiment = sentiment
+        self.disambiguated_movie = movie 
+        return self.print_disambiguate_prompt()
+
+      return self.add_movie(movie_idx, sentiment, movie)
+      
+
+    def add_movie(self, movie_idx, sentiment, movie):
       # If movie has already been rated and sentiment is found, then we can safely remove it from the vector
       # and it will be added in with the updated rating, but not increase vector size
       if (movie_idx, 1.0) in self.user_vec:
@@ -133,13 +168,18 @@ class Chatbot:
       elif (movie_idx, -1.0) in self.user_vec:
         self.user_vec.remove( (movie_idx, -1.0) )
         
-
       if sentiment == "pos":
         self.user_vec.append( (movie_idx, 1.0) )
         response = "You liked \"" + movie + "\". Thank you!"
-      else:
+      elif sentiment == "neg":
         self.user_vec.append( (movie_idx, -1.0) )
         response = "You did not like \"" + movie + "\". Thank you!"
+      elif sentiment == "very pos":
+        self.user_vec.append( (movie_idx, 2.0) )
+        response = "You loved \"" + movie + "\", I should check it out sometime! Thank you!"
+      else:
+        self.user_vec.append( (movie_idx, -2.0) )
+        response = "Oh, I'm sorry to hear you hated \"" + movie + "\", but thank you!"
 
       if len(self.user_vec) % DATA_POINTS == 0: # Provide new recs every 5 data points
         self.rec_list_idx = 0
@@ -150,6 +190,22 @@ class Chatbot:
         response += " Tell me about another movie you have seen."
       return response
 
+    def disambiguate_movie(self, index):
+      movie_idx = self.disambiguate_list[index] 
+      movie = self.titles[movie_idx][0]
+      response = self.add_movie(index, self.disambiguate_sentiment, movie)
+      self.disambiguate_title_flag = False
+      self.disambiguate_list = []
+      self.disambiguate_sentiment = ""
+      self.disambiguated_movie = ""
+      return response
+
+    def print_disambiguate_prompt(self):
+      response = "We found various movies for \"%s\". Please choose type in the corresponding number of your intended movie:\n" % self.disambiguated_movie
+      for i,movie_idx in enumerate(self.disambiguate_list):
+        response += "\t%s: %s\n" % (str(i), self.titles[movie_idx][0])
+      response += "Or type \"None\" if you didn't mean any of these."
+      return response
 
     def print_recommendation(self):
       if self.rec_list_idx >= len(self.rec_list):
@@ -179,10 +235,12 @@ class Chatbot:
         start_article = movie.split()[0]
         adj_movie = movie.replace(start_article + " ", "")
         adj_movie += ", " + start_article
+      results = []
       for idx,title in enumerate(self.titles):
+        # if movie.lower() in title[0].lower() or adj_movie.lower() in title[0].lower():
         if movie in title[0] or adj_movie in title[0]:
-          return idx
-      return -1
+          results.append(idx)
+      return results
 
 
     def get_sentiment(self, input):
@@ -214,8 +272,12 @@ class Chatbot:
         if re.findall(intensifiers, word.lower()):
           insense = True
       # Return input's overall sentiment
-      if sentiment > epsilon:
+      if sentiment >= 3:
+        return "very pos"
+      elif sentiment > epsilon:
         return "pos"
+      elif sentiment <= -3:
+        return "very neg"
       elif sentiment < -epsilon:
         return "neg"
       else:
@@ -225,13 +287,15 @@ class Chatbot:
     def get_word_sentiment(self, word):
       # Get sentiment for word, checking for word variants and negatives
       coeff = 1
+      # multiple exclamation marks increase weight of word
       if len(re.findall('!', word)) > 1:
         coeff *= 2
       stemmed_word = ''.join(ch for ch in word if ch not in exclude)
 
       stemmed_word = self.stemmer.stem(stemmed_word)
+      # if word is in list of strong sentiment words, then we weigh more heavily
       if stemmed_word in strong_sentiment:
-        coeff *= 2
+        coeff *= 3
 
       if stemmed_word in self.sentiment:
         if self.sentiment[stemmed_word] == "pos":
@@ -341,6 +405,8 @@ class Chatbot:
 
       Our chatbox so far has more fine-grained sentiment extraction, it handles strong sentiment words,
       intensifiers, and exclamation marks.
+
+      We also have also implemented a feature to disambiguate titles.
       """
 
 
