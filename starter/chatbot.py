@@ -21,9 +21,11 @@ DATA_POINTS = 5
 epsilon = 1e-4
 articles = "a|an|the|la|el"
 negation_terms = "not|never|n't"
-pos_sentiment = ['love','hate','favorite','amazing']
-neg_sentiment = ['awful','terrible','worst']
-intensifiers = "very|extremely|really|too|totally|super"
+pos_sentiment = ['love','enjoy']
+neg_sentiment = ['hate','dislike']
+pos_adjective = ['favorite', 'best']
+neg_adjective = ['worst']
+intensifiers = "really|very|extremely"
 exclude = set(string.punctuation)
 
 class Chatbot:
@@ -37,10 +39,6 @@ class Chatbot:
       self.is_turbo = is_turbo
 
       self.stemmer = PorterStemmer()
-      for i,word in enumerate(pos_sentiment):
-        pos_sentiment[i] = self.stemmer.stem(word)
-      for i,word in enumerate(neg_sentiment):
-        neg_sentiment[i] = self.stemmer.stem(word)
 
       self.read_data()
       self.user_vec = []
@@ -51,6 +49,7 @@ class Chatbot:
       self.disambiguate_title_flag = False
       self.disambiguate_list = []
       self.disambiguate_sentiment = ""
+      self.disambiguate_input = ""
       self.disambiguated_movie = ""
       
 
@@ -122,6 +121,7 @@ class Chatbot:
             self.disambiguate_list = []
             self.disambiguate_sentiment = ""
             self.disambiguated_movie = ""
+            self.disambiguate_input = ""
             return "Ok. Tell me about another movie you have seen."
           else:
             return self.print_disambiguate_prompt()
@@ -158,33 +158,68 @@ class Chatbot:
         self.disambiguate_list = movie_idx_list
         self.disambiguate_sentiment = sentiment
         self.disambiguated_movie = movie 
+        self.disambiguate_input = input
         return self.print_disambiguate_prompt()
 
-      return self.add_movie(movie_idx, sentiment)
+      return self.add_movie(movie_idx, sentiment, input)
 
 
-    def add_movie(self, movie_idx, sentiment):
-      # If movie has already been rated and sentiment is found, then we can safely remove it from the vector
-      # and it will be added in with the updated rating, but not increase vector size
+    def add_movie(self, movie_idx, sentiment, input):
       movie = self.titles[movie_idx][0]
 
+      # If movie has already been rated and sentiment is found, then we can safely remove it from the vector
+      # and it will be added in with the updated rating, but not increase vector size
       if (movie_idx, 1.0) in self.user_vec:
         self.user_vec.remove( (movie_idx, 1.0) )
       elif (movie_idx, -1.0) in self.user_vec:
         self.user_vec.remove( (movie_idx, -1.0) )
-        
+
+      very = None
+      verb = "" # default verb
+      adjective = None
+      exclamations = 0
       if sentiment == "pos":
         self.user_vec.append( (movie_idx, 1.0) )
-        response = "You liked \"" + movie + "\". Thank you!"
+        verb = "like"
+        for word in input.split():
+          exclamations += len(re.findall("!", word))
+          word = word.replace("!","")
+          if re.findall(intensifiers,word.lower()):
+            very = re.findall(intensifiers, word.lower())[0]
+            if very == "very":
+              very = "very much"
+          for posword in pos_sentiment:
+            if self.stemmer.stem(word) == self.stemmer.stem(posword):
+              verb = posword
+          if word in pos_adjective:
+            adjective = word
       elif sentiment == "neg":
         self.user_vec.append( (movie_idx, -1.0) )
-        response = "You did not like \"" + movie + "\". Thank you!"
-      elif sentiment == "very pos":
-        self.user_vec.append( (movie_idx, 1.0) )
-        response = "You loved \"" + movie + "\", I should check it out sometime! Thank you!"
+        verb = "dislike" #default verb
+        for word in input.split():
+          exclamations += len(re.findall("!", word))
+          word = word.replace("!","")
+          if re.findall(intensifiers,word.lower()):
+            very = re.findall(intensifiers, word.lower())[0]
+            if very == "very":
+              very = "very much"
+          for negword in neg_sentiment:
+            if self.stemmer.stem(word) == self.stemmer.stem(negword):
+              verb = negword
+          if word == neg_adjective:
+            adjective = word
+
+      response = "You" 
+      if very:
+        response += " %s" % very 
+      response += " %sd \"%s\"" % (verb, movie)
+      if adjective:
+        response += ", it was the %s" % adjective
+      if exclamations > 0:
+        response += "!"*exclamations
       else:
-        self.user_vec.append( (movie_idx, -1.0) )
-        response = "Oh, I'm sorry to hear you hated \"" + movie + "\", but thank you!"
+        response += "."
+      response += " Thank you!"
 
       if len(self.user_vec) % DATA_POINTS == 0: # Provide new recs every 5 data points
         self.rec_list_idx = 0
@@ -195,8 +230,47 @@ class Chatbot:
         response += " Tell me about another movie you have seen."
       return response
 
+    def get_sentiment(self, input):
+      # First remove movie title from string
+      movie = re.findall("(\".+?\")", input)
+      if movie:
+        input = input.replace(movie[0], '')
+      input = input.split()
+      # Get pos and neg scores
+      # pos = neg = 0.0
+      sentiment = 0
+      negation = False
+
+      for word in input:
+        stemmed_word = ''.join(ch for ch in word if ch not in exclude)
+        stemmed_word = self.stemmer.stem(stemmed_word)
+        word_sentiment = self.get_word_sentiment(stemmed_word)
+        if word_sentiment:
+          if negation:
+            sentiment -= word_sentiment
+            negation = False
+          else:
+            sentiment += word_sentiment
+        if re.findall(negation_terms, word.lower()):
+          negation = True
+      if sentiment > epsilon:
+        return "pos"
+      elif sentiment < -epsilon:
+        return "neg"
+      else:
+        return None
+
+    def get_word_sentiment(self, word):
+      if word in self.sentiment:
+        if self.sentiment[word] == "pos":
+          return 1
+        else:
+          return -1
+      return None
+
     def disambiguate_movie(self, index):
-      response = self.add_movie(index, self.disambiguate_sentiment)
+      index = self.disambiguate_list[index]
+      response = self.add_movie(index, self.disambiguate_sentiment, self.disambiguate_input)
       self.disambiguate_title_flag = False
       self.disambiguate_list = []
       self.disambiguate_sentiment = ""
@@ -293,7 +367,11 @@ class Chatbot:
 
       # All of the spell checking code
       if len(results) == 0:
-        min_dist = float('inf')
+        if movie.split()[-1].isdigit():
+          movie = movie[:-1]
+          return self.get_movie(movie)
+
+        min_dist = 4
         min_idx = ''
         year = re.findall("(\([0-9]{4}\))", movie)
         if year:
@@ -329,67 +407,6 @@ class Chatbot:
             results.append(min_idx)
 
       return results
-
-
-    def get_sentiment(self, input):
-      # First remove movie title from string
-      movie = re.findall("(\".+?\")", input)
-      if movie:
-        input = input.replace(movie[0], '')
-      input = input.split()
-      # Get pos and neg scores
-      # pos = neg = 0.0
-      sentiment = 0
-      negation = intense = very_neg = very_pos = False
-
-      for word in input:
-        stemmed_word = ''.join(ch for ch in word if ch not in exclude)
-        stemmed_word = self.stemmer.stem(stemmed_word)
-        word_sentiment = self.get_word_sentiment(stemmed_word)
-        # if word has an intensifier such as an exclamation mark, weigh times 2
-        coeff = 1
-        if len(re.findall('!', word)) > 1:
-          coeff *= 2
-        if word_sentiment:
-          if intense:
-            word_sentiment *= 2
-            intense = False
-          if negation:
-            sentiment -= word_sentiment*coeff
-            negation = False
-          else:
-            # change response based on certain strong sentiment words
-            # not doing this for negations because "did not love" does not imply "hated"
-            if stemmed_word in neg_sentiment:
-              very_neg = True
-            if stemmed_word in pos_sentiment:
-              very_pos = True
-            sentiment += word_sentiment*coeff
-
-        if re.findall(negation_terms, word.lower()):
-          negation = True
-        if re.findall(intensifiers, word.lower()):
-          insense = True
-      
-      if sentiment > epsilon:
-        if sentiment >= 3 or very_pos:
-          return "very pos"
-        return "pos"
-      elif sentiment < -epsilon:
-        if sentiment <= -3 or very_neg:
-          return "very neg"
-        return "neg"
-      else:
-        return None
-
-
-    def get_word_sentiment(self, word):
-      if word in self.sentiment:
-        if self.sentiment[word] == "pos":
-          return 1
-        else:
-          return -1
-      return None
 
 
     #############################################################################
