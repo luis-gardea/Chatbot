@@ -21,7 +21,8 @@ DATA_POINTS = 5
 epsilon = 1e-4
 articles = "a|an|the|la|el"
 negation_terms = "not|never|n't"
-strong_sentiment = ['love','hate','favorite','amazing','terrible','worst']
+pos_sentiment = ['love','hate','favorite','amazing']
+neg_sentiment = ['awful','terrible','worst']
 intensifiers = "very|extremely|really|too|totally|super"
 exclude = set(string.punctuation)
 
@@ -36,8 +37,10 @@ class Chatbot:
       self.is_turbo = is_turbo
 
       self.stemmer = PorterStemmer()
-      for i,word in enumerate(strong_sentiment):
-        strong_sentiment[i] = self.stemmer.stem(word)
+      for i,word in enumerate(pos_sentiment):
+        pos_sentiment[i] = self.stemmer.stem(word)
+      for i,word in enumerate(neg_sentiment):
+        neg_sentiment[i] = self.stemmer.stem(word)
 
       self.read_data()
       self.user_vec = []
@@ -157,12 +160,14 @@ class Chatbot:
         self.disambiguated_movie = movie 
         return self.print_disambiguate_prompt()
 
-      return self.add_movie(movie_idx, sentiment, movie)
-      
+      return self.add_movie(movie_idx, sentiment)
 
-    def add_movie(self, movie_idx, sentiment, movie):
+
+    def add_movie(self, movie_idx, sentiment):
       # If movie has already been rated and sentiment is found, then we can safely remove it from the vector
       # and it will be added in with the updated rating, but not increase vector size
+      movie = self.titles[movie_idx][0]
+
       if (movie_idx, 1.0) in self.user_vec:
         self.user_vec.remove( (movie_idx, 1.0) )
       elif (movie_idx, -1.0) in self.user_vec:
@@ -175,10 +180,10 @@ class Chatbot:
         self.user_vec.append( (movie_idx, -1.0) )
         response = "You did not like \"" + movie + "\". Thank you!"
       elif sentiment == "very pos":
-        self.user_vec.append( (movie_idx, 2.0) )
+        self.user_vec.append( (movie_idx, 1.0) )
         response = "You loved \"" + movie + "\", I should check it out sometime! Thank you!"
       else:
-        self.user_vec.append( (movie_idx, -2.0) )
+        self.user_vec.append( (movie_idx, -1.0) )
         response = "Oh, I'm sorry to hear you hated \"" + movie + "\", but thank you!"
 
       if len(self.user_vec) % DATA_POINTS == 0: # Provide new recs every 5 data points
@@ -191,9 +196,7 @@ class Chatbot:
       return response
 
     def disambiguate_movie(self, index):
-      movie_idx = self.disambiguate_list[index] 
-      movie = self.titles[movie_idx][0]
-      response = self.add_movie(index, self.disambiguate_sentiment, movie)
+      response = self.add_movie(index, self.disambiguate_sentiment)
       self.disambiguate_title_flag = False
       self.disambiguate_list = []
       self.disambiguate_sentiment = ""
@@ -201,7 +204,7 @@ class Chatbot:
       return response
 
     def print_disambiguate_prompt(self):
-      response = "We found various movies for \"%s\". Please choose type in the corresponding number of your intended movie:\n" % self.disambiguated_movie
+      response = "We found various movies for \"%s\". Please type in the corresponding number of your intended movie:\n" % self.disambiguated_movie
       for i,movie_idx in enumerate(self.disambiguate_list):
         response += "\t%s: %s\n" % (str(i), self.titles[movie_idx][0])
       response += "Or type \"None\" if you didn't mean any of these."
@@ -225,11 +228,59 @@ class Chatbot:
       self.user_cont_flag = False
       return response
 
+    def dameraulevenshtein(self, seq1, seq2):
+      """Calculate the Damerau-Levenshtein distance between sequences.
+
+      THIS CODE IS FROM PA2 STARTER CODE
+
+      This distance is the number of additions, deletions, substitutions,
+      and transpositions needed to transform the first sequence into the
+      second. Although generally used with strings, any sequences of
+      comparable objects will work.
+
+      Transpositions are exchanges of *consecutive* characters; all other
+      operations are self-explanatory.
+
+      This implementation is O(N*M) time and O(M) space, for N and M the
+      lengths of the two sequences.
+
+      >>> dameraulevenshtein('ba', 'abc')
+      2
+      >>> dameraulevenshtein('fee', 'deed')
+      2
+
+      It works with arbitrary sequences too:
+      >>> dameraulevenshtein('abcd', ['b', 'a', 'c', 'd', 'e'])
+      2
+      """ 
+      # codesnippet:D0DE4716-B6E6-4161-9219-2903BF8F547F
+      # Conceptually, this is based on a len(seq1) + 1 * len(seq2) + 1 matrix.
+      # However, only the current and two previous rows are needed at once,
+      # so we only store those.
+      oneago = None
+      thisrow = range(1, len(seq2) + 1) + [0]
+      for x in xrange(len(seq1)):
+          # Python lists wrap around for negative indices, so put the
+          # leftmost column at the *end* of the list. This matches with
+          # the zero-indexed strings and saves extra calculation.
+          twoago, oneago, thisrow = oneago, thisrow, [0] * len(seq2) + [x + 1]
+          for y in xrange(len(seq2)):
+              delcost = oneago[y] + 1
+              addcost = thisrow[y - 1] + 1
+              subcost = oneago[y - 1] + (seq1[x] != seq2[y])
+              thisrow[y] = min(delcost, addcost, subcost)
+              # This block deals with transpositions
+              if (x > 0 and y > 0 and seq1[x] == seq2[y - 1]
+                  and seq1[x-1] == seq2[y] and seq1[x] != seq2[y]):
+                  thisrow[y] = min(thisrow[y], twoago[y - 2] + 1)
+      return thisrow[len(seq2) - 1]
+
 
     def get_movie(self, movie):
       # Get index of movie in titles array, -1 if absent
       if not movie or len(movie.split()) == 0:
         return -1
+      movie = movie.lower()
       adj_movie = movie
       if re.findall(articles, movie.split()[0].lower()):
         start_article = movie.split()[0]
@@ -237,9 +288,46 @@ class Chatbot:
         adj_movie += ", " + start_article
       results = []
       for idx,title in enumerate(self.titles):
-        # if movie.lower() in title[0].lower() or adj_movie.lower() in title[0].lower():
-        if movie in title[0] or adj_movie in title[0]:
+        if movie.lower() in title[0].lower() or adj_movie.lower() in title[0].lower():
           results.append(idx)
+
+      # All of the spell checking code
+      if len(results) == 0:
+        min_dist = float('inf')
+        min_idx = ''
+        year = re.findall("(\([0-9]{4}\))", movie)
+        if year:
+          movie = movie.replace(year[0], '')
+          movie = movie
+        for idx, title in enumerate(self.titles):
+          year = re.findall("(\([0-9]{4}\))", title[0])
+          title = title[0].lower()
+          if year:
+            title = title.replace(year[0], '')
+
+          alternate_title = re.findall("(\([A-Za-z ]+\))",title)
+          actual_title = title.strip()
+
+          if alternate_title:
+            alternate_title = alternate_title[0].strip()
+            actual_title = actual_title.replace(alternate_title,'').strip()
+
+            dist = min(self.dameraulevenshtein(movie, alternate_title),self.dameraulevenshtein(adj_movie, alternate_title))
+            if dist <= min_dist:
+              if dist < min_dist:
+                results = []
+              min_dist = dist 
+              min_idx = idx
+              results.append(min_idx)
+
+          dist = min(self.dameraulevenshtein(movie, actual_title),self.dameraulevenshtein(adj_movie, actual_title))
+          if dist <= min_dist:
+            if dist < min_dist:
+              results = []
+            min_dist = dist 
+            min_idx = idx
+            results.append(min_idx)
+
       return results
 
 
@@ -252,60 +340,55 @@ class Chatbot:
       # Get pos and neg scores
       # pos = neg = 0.0
       sentiment = 0
-      negation = False
-      intense = False
+      negation = intense = very_neg = very_pos = False
+
       for word in input:
-        word_sentiment = self.get_word_sentiment(word)
-        print word, word_sentiment
+        stemmed_word = ''.join(ch for ch in word if ch not in exclude)
+        stemmed_word = self.stemmer.stem(stemmed_word)
+        word_sentiment = self.get_word_sentiment(stemmed_word)
+        # if word has an intensifier such as an exclamation mark, weigh times 2
+        coeff = 1
+        if len(re.findall('!', word)) > 1:
+          coeff *= 2
         if word_sentiment:
           if intense:
             word_sentiment *= 2
             intense = False
           if negation:
-            sentiment -= word_sentiment
+            sentiment -= word_sentiment*coeff
             negation = False
           else:
-            sentiment += word_sentiment
+            # change response based on certain strong sentiment words
+            # not doing this for negations because "did not love" does not imply "hated"
+            if stemmed_word in neg_sentiment:
+              very_neg = True
+            if stemmed_word in pos_sentiment:
+              very_pos = True
+            sentiment += word_sentiment*coeff
 
         if re.findall(negation_terms, word.lower()):
           negation = True
         if re.findall(intensifiers, word.lower()):
           insense = True
-      # Return input's overall sentiment
-      if sentiment >= 3:
-        return "very pos"
-      elif sentiment > epsilon:
+      
+      if sentiment > epsilon:
+        if sentiment >= 3 or very_pos:
+          return "very pos"
         return "pos"
-      elif sentiment <= -3:
-        return "very neg"
       elif sentiment < -epsilon:
+        if sentiment <= -3 or very_neg:
+          return "very neg"
         return "neg"
       else:
         return None
 
 
     def get_word_sentiment(self, word):
-      # Get sentiment for word, checking for word variants and negatives
-      coeff = 1
-      # multiple exclamation marks increase weight of word
-      if len(re.findall('!', word)) > 1:
-        coeff *= 2
-      stemmed_word = ''.join(ch for ch in word if ch not in exclude)
-
-      stemmed_word = self.stemmer.stem(stemmed_word)
-      # if word is in list of strong sentiment words, then we weigh more heavily
-      if stemmed_word in strong_sentiment:
-        coeff *= 3
-
-      if stemmed_word in self.sentiment:
-        if self.sentiment[stemmed_word] == "pos":
-          return 1*coeff
+      if word in self.sentiment:
+        if self.sentiment[word] == "pos":
+          return 1
         else:
-          return -1*coeff
-      # if word[-1] == "d" and word[:-1] in self.sentiment:
-      #   return self.sentiment[word[:-1]]
-      # if word[-2:] == "ed" and word[:-2] in self.sentiment:
-      #   return self.sentiment[word[:-2]]
+          return -1
       return None
 
 
@@ -406,7 +489,12 @@ class Chatbot:
       Our chatbox so far has more fine-grained sentiment extraction, it handles strong sentiment words,
       intensifiers, and exclamation marks.
 
-      We also have also implemented a feature to disambiguate titles.
+      We also have also implemented a feature to disambiguate titles. It gives a list of possible movies
+      fitting the input given. The user then selects the correct one.
+
+      We then implemented a spell-checker. It uses Damerau-Levenshtein distance. This feature also works 
+      with the previous feature, as it still attempts to disambiguate between spelling mistakes and also 
+      between possible results with the same Damerau-Levenshtein distance.
       """
 
 
