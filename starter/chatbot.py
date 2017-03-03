@@ -178,6 +178,7 @@ class Chatbot:
 
       return self.add_movie(movie_idx, sentiment, input)
 
+    # This will attempt to find a movie when one is listed without quotation marks
     def find_movie(self, input):
       input_sep = input.split()
       results = []
@@ -405,7 +406,7 @@ class Chatbot:
     def dameraulevenshtein(self, seq1, seq2):
       """Calculate the Damerau-Levenshtein distance between sequences.
 
-      THIS CODE IS FROM PA2 STARTER CODE
+      CITATION: THIS CODE IS FROM PA2 STARTER CODE
 
       This distance is the number of additions, deletions, substitutions,
       and transpositions needed to transform the first sequence into the
@@ -610,19 +611,24 @@ class Chatbot:
 
       Pablo can also handle happy, sad, and angry emotions in turbo mode when a movie title is not
       in the input. E.g. I am angry about the election.
+      This feature will only extract emotion if it was unable to find a movie written in the message.
 
       Our chatbox so far has more fine-grained sentiment extraction, it handles strong sentiment words,
-      intensifiers, and exclamation marks.
+      intensifiers, and exclamation marks. E.g. I really liked "Tarzan", it was my favorite.
 
       We also have also implemented a feature to disambiguate titles. It gives a list of possible movies
-      fitting the input given. The user then selects the correct one.
+      fitting the input given. The user then selects the correct one or none from the list. 
+      E.g. I liked "Harry Potter"
 
       We then implemented a spell-checker. It uses Damerau-Levenshtein distance. This feature also works
       with the previous feature, as it still attempts to disambiguate between spelling mistakes and also
       between possible results with the same Damerau-Levenshtein distance.
+      E.g. I enjoyed "Alice in wndrlnd"
+
+      We have added the functionality to extract foreign or alternate titles.
 
       We also added functionality to extract movie titles without requiring quotation marks. This feature
-      also works with the movie disambiguation feature.
+      also works with the movie disambiguation feature. E.g. I loved Nacho libre
       """
 
 
