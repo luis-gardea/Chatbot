@@ -26,6 +26,9 @@ neg_sentiment = ['hate','dislike']
 pos_adjective = ['favorite', 'best','amazing', 'fantastic', 'charming', 'original', 'powerful', 'clever', 'riveting', 'hilarious', 'funny']
 neg_adjective = ['worst', 'terrible', 'predictable', 'dreadful', 'confusing', 'disappointing', 'stupid', 'boring']
 intensifiers = "really|very|extremely"
+emotion_anger = ["angry", "enraged", "mad", "infuriated", "provoked", "livid", "furious", "irate", "aggravated", "outraged", "pissed"]
+emotion_happy = ["happy", "excited", "ecstatic", "cheerful", "joy", "euphoric", "joyful", "glad", "elated", "laughing", "turnt"]
+emotion_sad = ["sad", "disappointed", "unhappy", "sorry", "dejected", "morose", "depressing", "sorrowful", "distresssed", "distraught"]
 exclude = set(string.punctuation)
 
 class Chatbot:
@@ -137,6 +140,10 @@ class Chatbot:
       movie = re.findall("\"(.+?)\"", input)
       sentiment = self.get_sentiment(input)
       if not movie:
+        if self.is_turbo:
+          emotion = self.handleEmotions(input)
+          if emotion:
+            return emotion
         if sentiment < self.base_rating: # Guess user doesn't want to continue
           return "I want to hear more about movies! Tell me about another movie you have seen."
         return "Sorry, I don't understand. Tell me about a movie that you have seen."
@@ -236,6 +243,39 @@ class Chatbot:
       else:
         response += " Tell me about another movie you have seen."
       return response
+
+    def handleEmotions (self, input):
+      movie = re.findall("(\".+?\")", input)
+      if movie:
+        input = input.replace(movie[0], '')
+      input = input.split()
+      negation = False
+      pos_response = "I'm glad to hear you're happy! Maybe it's time for a new feel good movie! Let me know what movies you like!"
+      neg_response = "I'm sorry to hear you're upset. Maybe a movie recommendation will cheer you up. Let me know what movies you like!"
+      anger_response = "I'm sorry to hear you're angry. Maybe it's time for a new feel good movie! Let me know what movies you like!"
+      not_anger_response = "I'm glad to hear you're not angry. It's a perfect time for a new movie! Let me know what movies you like!"
+      for word in input:
+        for e in emotion_happy:
+          if self.stemmer.stem(word) == self.stemmer.stem(e):
+            if not negation:
+              return pos_response
+            else:
+              return neg_response
+        for e in emotion_sad:
+          if self.stemmer.stem(word) == self.stemmer.stem(e):
+            if not negation:
+              return neg_response
+            else:
+              return pos_response
+        for e in emotion_anger:
+          if self.stemmer.stem(word) == self.stemmer.stem(e):
+            if not negation:
+              return anger_response
+            else:
+              return not_anger_response
+        if re.findall(negation_terms, word.lower()):
+          negation = True
+      return None
 
     def get_sentiment(self, input):
       # First remove movie title from string
@@ -533,6 +573,9 @@ class Chatbot:
       for non binarized data with better recommendations or the starter mode to get normal binarized
       data based recommendations. The non binarized dataset works in conjunction with a feature that
       is able to extract a 1 - 5 ranking of input sentiment about a movie to get you better recs!
+
+      Pablo can also handle happy, sad, and angry emotions in turbo mode when a movie title is not
+      in the input. E.g. I am angry about the election.
 
       Our chatbox so far has more fine-grained sentiment extraction, it handles strong sentiment words,
       intensifiers, and exclamation marks.
