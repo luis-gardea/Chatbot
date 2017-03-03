@@ -21,10 +21,10 @@ DATA_POINTS = 5
 epsilon = 1e-4
 articles = "a|an|the|la|el"
 negation_terms = "not|never|n't"
-pos_sentiment = ['love','enjoy']
+pos_sentiment = ['love','enjoy','like','appreciate', 'recommend']
 neg_sentiment = ['hate','dislike']
-pos_adjective = ['favorite', 'best']
-neg_adjective = ['worst']
+pos_adjective = ['favorite', 'best','amazing', 'fantastic', 'charming', 'original', 'powerful', 'clever', 'riveting', 'hilarious', 'funny']
+neg_adjective = ['worst', 'terrible', 'predictable', 'dreadful', 'confusing', 'disappointing', 'stupid', 'boring']
 intensifiers = "really|very|extremely"
 exclude = set(string.punctuation)
 
@@ -51,7 +51,7 @@ class Chatbot:
       self.disambiguate_sentiment = ""
       self.disambiguate_input = ""
       self.disambiguated_movie = ""
-      
+
 
     #############################################################################
     # 1. WARM UP REPL
@@ -137,14 +137,14 @@ class Chatbot:
       movie = re.findall("\"(.+?)\"", input)
       sentiment = self.get_sentiment(input)
       if not movie:
-        if sentiment == "neg": # Guess user doesn't want to continue
+        if sentiment < self.base_rating: # Guess user doesn't want to continue
           return "I want to hear more about movies! Tell me about another movie you have seen."
         return "Sorry, I don't understand. Tell me about a movie that you have seen."
       if len(movie) > 1:
         return "Please tell me about one movie at a time. Go ahead."
 
       movie = movie[0]
-      if not sentiment:
+      if sentiment == self.base_rating:
         return "I'm sorry, I'm not quite sure if you liked \"" + movie + "\". Tell me more about \"" + movie + "\"."
 
       movie_idx = -1
@@ -157,7 +157,7 @@ class Chatbot:
         self.disambiguate_title_flag = True
         self.disambiguate_list = movie_idx_list
         self.disambiguate_sentiment = sentiment
-        self.disambiguated_movie = movie 
+        self.disambiguated_movie = movie
         self.disambiguate_input = input
         return self.print_disambiguate_prompt()
 
@@ -169,17 +169,21 @@ class Chatbot:
 
       # If movie has already been rated and sentiment is found, then we can safely remove it from the vector
       # and it will be added in with the updated rating, but not increase vector size
-      if (movie_idx, 1.0) in self.user_vec:
-        self.user_vec.remove( (movie_idx, 1.0) )
-      elif (movie_idx, -1.0) in self.user_vec:
-        self.user_vec.remove( (movie_idx, -1.0) )
+      if not self.is_turbo:
+        if (movie_idx, 1.0) in self.user_vec:
+          self.user_vec.remove( (movie_idx, 1.0) )
+        elif (movie_idx, -1.0) in self.user_vec:
+          self.user_vec.remove( (movie_idx, -1.0) )
 
       very = None
       verb = "" # default verb
       adjective = None
       exclamations = 0
-      if sentiment == "pos":
-        self.user_vec.append( (movie_idx, 1.0) )
+      if sentiment >= self.base_rating:
+        if self.is_turbo:
+          self.user_vec.append( (movie_idx, sentiment) )
+        else:
+          self.user_vec.append( (movie_idx, 1.0) )
         verb = "like"
         for word in input.split():
           exclamations += len(re.findall("!", word))
@@ -193,8 +197,11 @@ class Chatbot:
               verb = posword
           if word in pos_adjective:
             adjective = word
-      elif sentiment == "neg":
-        self.user_vec.append( (movie_idx, -1.0) )
+      elif sentiment < self.base_rating:
+        if self.is_turbo:
+          self.user_vec.append( (movie_idx, sentiment) )
+        else:
+          self.user_vec.append( (movie_idx, -1.0) )
         verb = "dislike" #default verb
         for word in input.split():
           exclamations += len(re.findall("!", word))
@@ -209,9 +216,9 @@ class Chatbot:
           if word == neg_adjective:
             adjective = word
 
-      response = "You" 
+      response = "You"
       if very:
-        response += " %s" % very 
+        response += " %s" % very
       response += " %sd \"%s\"" % (verb, movie)
       if adjective:
         response += ", it was the %s" % adjective
@@ -238,14 +245,19 @@ class Chatbot:
       input = input.split()
       # Get pos and neg scores
       # pos = neg = 0.0
-      sentiment = 0
+      sentiment = 0.0
       negation = False
-
+      intensifier = False
+      pos_mult = 1
+      neg_mult = 1
       for word in input:
         stemmed_word = ''.join(ch for ch in word if ch not in exclude)
         stemmed_word = self.stemmer.stem(stemmed_word)
         word_sentiment = self.get_word_sentiment(stemmed_word)
         if word_sentiment:
+          if intensifier:
+            word_sentiment *= 2
+            intensifier = False
           if negation:
             sentiment -= word_sentiment
             negation = False
@@ -253,18 +265,33 @@ class Chatbot:
             sentiment += word_sentiment
         if re.findall(negation_terms, word.lower()):
           negation = True
-      if sentiment > epsilon:
-        return "pos"
-      elif sentiment < -epsilon:
-        return "neg"
-      else:
-        return None
+        if re.findall(intensifiers, word.lower()):
+          intensifier = True
+
+      rating = self.base_rating + sentiment/2.0
+      if rating > 5.0:
+        rating = 5.0
+      elif rating < 1.0:
+        rating = 1.0
+      return self.base_rating + sentiment/2.0
 
     def get_word_sentiment(self, word):
       if word in self.sentiment:
         if self.sentiment[word] == "pos":
+          for pos_word in pos_sentiment:
+            if word == self.stemmer.stem(pos_word):
+              return 2
+          for pos_adj in pos_adjective:
+            if word == self.stemmer.stem(pos_adj):
+              return 2
           return 1
         else:
+          for neg_word in neg_sentiment:
+            if word == self.stemmer.stem(neg_word):
+              return -2
+          for neg_adj in neg_adjective:
+            if word == self.stemmer.stem(neg_adj):
+              return -2
           return -1
       return None
 
@@ -287,7 +314,7 @@ class Chatbot:
     def print_recommendation(self):
       if self.rec_list_idx >= len(self.rec_list):
         self.user_cont_flag = True
-        return "I need more information to provide new recommendations. Tell me about another movie you have seen." 
+        return "I need more information to provide new recommendations. Tell me about another movie you have seen."
       # Print movie recommendation, parse title correctly
       movie = self.titles[self.rec_list[self.rec_list_idx][0]][0]
       remove_vals = re.findall("(\(.*?\))", movie)
@@ -326,7 +353,7 @@ class Chatbot:
       It works with arbitrary sequences too:
       >>> dameraulevenshtein('abcd', ['b', 'a', 'c', 'd', 'e'])
       2
-      """ 
+      """
       # codesnippet:D0DE4716-B6E6-4161-9219-2903BF8F547F
       # Conceptually, this is based on a len(seq1) + 1 * len(seq2) + 1 matrix.
       # However, only the current and two previous rows are needed at once,
@@ -394,7 +421,7 @@ class Chatbot:
             if dist <= min_dist:
               if dist < min_dist:
                 results = []
-              min_dist = dist 
+              min_dist = dist
               min_idx = idx
               results.append(min_idx)
 
@@ -402,7 +429,7 @@ class Chatbot:
           if dist <= min_dist:
             if dist < min_dist:
               results = []
-            min_dist = dist 
+            min_dist = dist
             min_idx = idx
             results.append(min_idx)
 
@@ -419,6 +446,7 @@ class Chatbot:
       # The values stored in each row i and column j is the rating for
       # movie i by user j
       self.titles, self.ratings = ratings()
+      self.base_rating = 3.0
       self.binarize()
       reader = csv.reader(open('data/sentiment.txt', 'rb'))
       sentiment = dict(reader)
@@ -445,7 +473,8 @@ class Chatbot:
           return -1.0
 
       btransform = np.vectorize(binary_transform, otypes=[np.float])
-      self.ratings = btransform(self.ratings, rating_avg)
+      if self.is_turbo:
+        self.ratings = btransform(self.ratings, rating_avg)
 
     def distance(self, u, v):
       """Calculates a given distance function between vectors u and v"""
@@ -498,10 +527,12 @@ class Chatbot:
     #############################################################################
     def intro(self):
       return """
-      Your task is to implement the chatbot as detailed in the PA6 instructions.
-      Remember: in the starter mode, movie names will come in quotation marks and
-      expressions of sentiment will be simple!
-      Write here the description for your own chatbot!
+      Welcome to our chatbot el patron, Pablo Gaviria!
+
+      Pablo can utilize binarized or non binarized data for movie recommendations. Use the turbo mode
+      for non binarized data with better recommendations or the starter mode to get normal binarized
+      data based recommendations. The non binarized dataset works in conjunction with a feature that
+      is able to extract a 1 - 5 ranking of input sentiment about a movie to get you better recs!
 
       Our chatbox so far has more fine-grained sentiment extraction, it handles strong sentiment words,
       intensifiers, and exclamation marks.
@@ -509,8 +540,8 @@ class Chatbot:
       We also have also implemented a feature to disambiguate titles. It gives a list of possible movies
       fitting the input given. The user then selects the correct one.
 
-      We then implemented a spell-checker. It uses Damerau-Levenshtein distance. This feature also works 
-      with the previous feature, as it still attempts to disambiguate between spelling mistakes and also 
+      We then implemented a spell-checker. It uses Damerau-Levenshtein distance. This feature also works
+      with the previous feature, as it still attempts to disambiguate between spelling mistakes and also
       between possible results with the same Damerau-Levenshtein distance.
       """
 
