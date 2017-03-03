@@ -17,6 +17,7 @@ from random import randint
 from PorterStemmer import PorterStemmer
 
 DATA_POINTS = 5
+NUM_RECS = 5
 
 epsilon = 1e-4
 articles = "a|an|the|la|el|los|las|la|le|l'|les|der|das|da|det|den"
@@ -130,12 +131,12 @@ class Chatbot:
             return self.print_disambiguate_prompt()
 
       # If recommendation just given, check answer whether user wants another movie
-      if not self.user_cont_flag:
-        if re.findall("yes", input.lower()):
-          return self.print_recommendation()
-        else:
-          self.user_cont_flag = True
-          return "Ok. Tell me about some more movies that you have seen in order for me to provide you with better recommendations."
+      # if not self.user_cont_flag:
+      #   if re.findall("yes", input.lower()):
+      #     return self.print_recommendation()
+      #   else:
+      #     self.user_cont_flag = True
+      #     return "Ok. Tell me about some more movies that you have seen in order for me to provide you with better recommendations."
 
       movie = re.findall("\"(.+?)\"", input)
       if self.is_turbo and not movie:
@@ -273,7 +274,12 @@ class Chatbot:
         self.rec_list_idx = 0
         self.rec_list = self.recommend(self.user_vec)
         response += " That's enough for me to make a recommendation. "
-        response += self.print_recommendation()
+        response += "I suggest you watch: "
+        for i in range(NUM_RECS):
+          response += "\"" + self.print_recommendation() + "\""
+          if i != NUM_RECS-1:
+            response += ", "
+        response += "."
       else:
         response += " Tell me about another movie you have seen."
       return response
@@ -398,7 +404,8 @@ class Chatbot:
       if article_val and re.findall(", " + article_val[-1].capitalize(), movie):
         movie = movie.replace(", " + article_val[-1].capitalize(), "")
         movie = article_val[-1].capitalize() + " " + movie
-      response = "I suggest you watch \"" + movie + "\". Would you like to hear another recommendation? (Or enter :quit if you're done.)"
+      # response = "I suggest you watch \"" + movie + "\"."
+      response = movie
       self.rec_list_idx += 1
       self.user_cont_flag = False
       return response
@@ -456,6 +463,9 @@ class Chatbot:
       if not movie or len(movie.split()) == 0:
         return -1
       movie = movie.lower()
+      year = re.findall("(\([0-9]{4}\))", movie)
+      if year:
+        movie = movie.replace(year[0], '')
       adj_movie = movie
       if re.findall(articles, movie.split()[0]):
         start_article = movie.split()[0]
@@ -463,7 +473,13 @@ class Chatbot:
         adj_movie += ", " + start_article
       results = []
       for idx,title in enumerate(self.titles):
-        if movie in title[0].lower() or adj_movie in title[0].lower():
+        title = title[0].lower()
+        year2 = re.findall("(\([0-9]{4}\))", title)
+        if year2 and year:
+          if year[0] != year2[0]:
+            continue
+          # title[0] = title[0].replace(year2[0], '')
+        if movie in title or adj_movie in title:
           results.append(idx)
 
       if self.is_turbo:
@@ -475,15 +491,13 @@ class Chatbot:
 
           min_dist = 4
           min_idx = ''
-          year = re.findall("(\([0-9]{4}\))", movie)
-          if year:
-            movie = movie.replace(year[0], '')
-            movie = movie
           for idx, title in enumerate(self.titles):
-            year = re.findall("(\([0-9]{4}\))", title[0])
+            year2 = re.findall("(\([0-9]{4}\))", title[0])
             title = title[0].lower()
             if year:
-              title = title.replace(year[0], '')
+              if year != year2:
+                continue
+            title = title.replace(year2[0], '')
 
             alternate_title = re.findall("(\([A-Za-z ]+\))",title)
             actual_title = title.strip()
@@ -557,11 +571,14 @@ class Chatbot:
       # Note: you can also think of this as computing a similarity measure
       # Use of cosine similarity measure, assumes u and v have equal length
       num = np.dot(u,v)
-      den_u = np.sum(u**2)
-      den_v = np.sum(v**2)
+      # den_u = np.sum(u**2)
+      # den_v = np.sum(v**2)
+      den_u = np.linalg.norm(u)
+      den_v = np.linalg.norm(v)
       if den_u == 0.0 or den_v == 0.0:
         return 0.0
-      return num / (math.sqrt(den_u) * math.sqrt(den_v))
+      # return num / (math.sqrt(den_u) * math.sqrt(den_v))
+      return num / (den_u * den_v)
 
 
     def recommend(self, u):
