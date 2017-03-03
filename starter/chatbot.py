@@ -581,7 +581,7 @@ class Chatbot:
           rxi += (rxj * sij)
         movie_rank = [i, rxi] # Store movie index and rating
         rec_list.append(movie_rank)
-      rec_list = sorted(rec_list, key=lambda x:x[1], reverse = True)
+      rec_list = sorted(rec_list, key=lambda x:x[1], reverse = True) 
       return rec_list
 
 
@@ -602,7 +602,7 @@ class Chatbot:
     #############################################################################
     def intro(self):
       return """
-      Welcome to our chatbot el patron, Pablo Gaviria!
+      Welcome to our chatbot El Patron, Pablo Gaviria!
 
       Pablo can utilize binarized or non binarized data for movie recommendations. Use the turbo mode
       for non binarized data with better recommendations or the starter mode to get normal binarized
@@ -625,7 +625,7 @@ class Chatbot:
       between possible results with the same Damerau-Levenshtein distance.
       E.g. I enjoyed "Alice in wndrlnd"
 
-      We have added the functionality to extract foreign or alternate titles.
+      We have added the functionality to extract foreign and/or alternate titles.
 
       We also added functionality to extract movie titles without requiring quotation marks. This feature
       also works with the movie disambiguation feature. E.g. I loved Nacho libre
