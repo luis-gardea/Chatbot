@@ -19,7 +19,7 @@ from PorterStemmer import PorterStemmer
 DATA_POINTS = 5
 
 epsilon = 1e-4
-articles = "a|an|the|la|el"
+articles = "a|an|the|la|el|los|las|la|le|l'|les|der|das|da|det|den"
 negation_terms = "not|never|n't"
 pos_sentiment = ['love','enjoy','like','appreciate', 'recommend']
 neg_sentiment = ['hate','dislike']
@@ -106,12 +106,12 @@ class Chatbot:
       # calling other functions. Although modular code is not graded, it is       #
       # highly recommended                                                        #
       #############################################################################
-    #   if self.is_turbo == True:
-    #     response = 'processed %s in creative mode!!' % input
-    #   else:
-    #     response = 'processed %s in starter mode' % input
+      # if self.is_turbo == True:
+      #   print 'processed %s in creative mode!!' % input
+      # else:
+      #   print 'processed %s in starter mode' % input
 
-      if self.disambiguate_title_flag:
+      if self.is_turbo and self.disambiguate_title_flag:
         if input.isdigit():
           index = int(input)
           if index >= 0 and index < len(self.disambiguate_list):
@@ -138,6 +138,11 @@ class Chatbot:
           return "Ok. Tell me about some more movies that you have seen in order for me to provide you with better recommendations."
 
       movie = re.findall("\"(.+?)\"", input)
+      if self.is_turbo and not movie:
+        if self.find_movie(input):
+          input = self.find_movie(input)
+          movie = re.findall("\"(.+?)\"", input)
+
       sentiment = self.get_sentiment(input)
       if not movie:
         if self.is_turbo:
@@ -161,14 +166,43 @@ class Chatbot:
       elif len(movie_idx_list) == 1:
         movie_idx = movie_idx_list[0]
       else:
-        self.disambiguate_title_flag = True
-        self.disambiguate_list = movie_idx_list
-        self.disambiguate_sentiment = sentiment
-        self.disambiguated_movie = movie
-        self.disambiguate_input = input
-        return self.print_disambiguate_prompt()
+        if self.is_turbo:
+          self.disambiguate_title_flag = True
+          self.disambiguate_list = movie_idx_list
+          self.disambiguate_sentiment = sentiment
+          self.disambiguated_movie = movie 
+          self.disambiguate_input = input
+          return self.print_disambiguate_prompt()
+        else:
+          movie_idx = movie_idx_list[0]
 
       return self.add_movie(movie_idx, sentiment, input)
+
+    # This will attempt to find a movie when one is listed without quotation marks
+    def find_movie(self, input):
+      input_sep = input.split()
+      results = []
+      for i in range(len(input_sep)):
+        if input_sep[i].istitle():
+          for j in range(i,len(input_sep)+1):
+            movie = " ".join(input_sep[i:j])
+            if not movie or len(movie.split()) < 1:
+              continue
+            movie = movie.lower()
+            adj_movie = movie.lower()
+            if re.findall(articles, movie.split()[0]):
+              start_article = movie.split()[0]
+              adj_movie = movie.replace(start_article + " ", "")
+              adj_movie += ", " + start_article
+            for idx,title in enumerate(self.titles):
+              if movie in title[0].lower() or adj_movie in title[0].lower():
+                if not (movie in results):
+                  results.append(movie)
+      if len(results) > 0:
+        movie = max(results, key=lambda y: len(y))
+        input = input.lower().replace(movie,"\"" + movie + "\"")
+        return input
+      return None
 
 
     def add_movie(self, movie_idx, sentiment, input):
@@ -372,7 +406,7 @@ class Chatbot:
     def dameraulevenshtein(self, seq1, seq2):
       """Calculate the Damerau-Levenshtein distance between sequences.
 
-      THIS CODE IS FROM PA2 STARTER CODE
+      CITATION: THIS CODE IS FROM PA2 STARTER CODE
 
       This distance is the number of additions, deletions, substitutions,
       and transpositions needed to transform the first sequence into the
@@ -423,55 +457,56 @@ class Chatbot:
         return -1
       movie = movie.lower()
       adj_movie = movie
-      if re.findall(articles, movie.split()[0].lower()):
+      if re.findall(articles, movie.split()[0]):
         start_article = movie.split()[0]
         adj_movie = movie.replace(start_article + " ", "")
         adj_movie += ", " + start_article
       results = []
       for idx,title in enumerate(self.titles):
-        if movie.lower() in title[0].lower() or adj_movie.lower() in title[0].lower():
+        if movie in title[0].lower() or adj_movie in title[0].lower():
           results.append(idx)
 
-      # All of the spell checking code
-      if len(results) == 0:
-        if movie.split()[-1].isdigit():
-          movie = movie[:-1]
-          return self.get_movie(movie)
+      if self.is_turbo:
+        # All of the spell checking code
+        if len(results) == 0:
+          if movie.split()[-1].isdigit():
+            movie = movie[:-1]
+            return self.get_movie(movie)
 
-        min_dist = 4
-        min_idx = ''
-        year = re.findall("(\([0-9]{4}\))", movie)
-        if year:
-          movie = movie.replace(year[0], '')
-          movie = movie
-        for idx, title in enumerate(self.titles):
-          year = re.findall("(\([0-9]{4}\))", title[0])
-          title = title[0].lower()
+          min_dist = 4
+          min_idx = ''
+          year = re.findall("(\([0-9]{4}\))", movie)
           if year:
-            title = title.replace(year[0], '')
+            movie = movie.replace(year[0], '')
+            movie = movie
+          for idx, title in enumerate(self.titles):
+            year = re.findall("(\([0-9]{4}\))", title[0])
+            title = title[0].lower()
+            if year:
+              title = title.replace(year[0], '')
 
-          alternate_title = re.findall("(\([A-Za-z ]+\))",title)
-          actual_title = title.strip()
+            alternate_title = re.findall("(\([A-Za-z ]+\))",title)
+            actual_title = title.strip()
 
-          if alternate_title:
-            alternate_title = alternate_title[0].strip()
-            actual_title = actual_title.replace(alternate_title,'').strip()
+            if alternate_title:
+              alternate_title = alternate_title[0].strip()
+              actual_title = actual_title.replace(alternate_title,'').strip()
 
-            dist = min(self.dameraulevenshtein(movie, alternate_title),self.dameraulevenshtein(adj_movie, alternate_title))
+              dist = min(self.dameraulevenshtein(movie, alternate_title),self.dameraulevenshtein(adj_movie, alternate_title))
+              if dist <= min_dist:
+                if dist < min_dist:
+                  results = []
+                min_dist = dist 
+                min_idx = idx
+                results.append(min_idx)
+
+            dist = min(self.dameraulevenshtein(movie, actual_title),self.dameraulevenshtein(adj_movie, actual_title))
             if dist <= min_dist:
               if dist < min_dist:
                 results = []
               min_dist = dist
               min_idx = idx
               results.append(min_idx)
-
-          dist = min(self.dameraulevenshtein(movie, actual_title),self.dameraulevenshtein(adj_movie, actual_title))
-          if dist <= min_dist:
-            if dist < min_dist:
-              results = []
-            min_dist = dist
-            min_idx = idx
-            results.append(min_idx)
 
       return results
 
@@ -546,7 +581,7 @@ class Chatbot:
           rxi += (rxj * sij)
         movie_rank = [i, rxi] # Store movie index and rating
         rec_list.append(movie_rank)
-      rec_list = sorted(rec_list, key=lambda x:x[1], reverse = True)
+      rec_list = sorted(rec_list, key=lambda x:x[1], reverse = True) 
       return rec_list
 
 
@@ -567,7 +602,7 @@ class Chatbot:
     #############################################################################
     def intro(self):
       return """
-      Welcome to our chatbot el patron, Pablo Gaviria!
+      Welcome to our chatbot El Patron, Pablo Gaviria!
 
       Pablo can utilize binarized or non binarized data for movie recommendations. Use the turbo mode
       for non binarized data with better recommendations or the starter mode to get normal binarized
@@ -576,16 +611,24 @@ class Chatbot:
 
       Pablo can also handle happy, sad, and angry emotions in turbo mode when a movie title is not
       in the input. E.g. I am angry about the election.
+      This feature will only extract emotion if it was unable to find a movie written in the message.
 
       Our chatbox so far has more fine-grained sentiment extraction, it handles strong sentiment words,
-      intensifiers, and exclamation marks.
+      intensifiers, and exclamation marks. E.g. I really liked "Tarzan", it was my favorite.
 
       We also have also implemented a feature to disambiguate titles. It gives a list of possible movies
-      fitting the input given. The user then selects the correct one.
+      fitting the input given. The user then selects the correct one or none from the list. 
+      E.g. I liked "Harry Potter"
 
       We then implemented a spell-checker. It uses Damerau-Levenshtein distance. This feature also works
       with the previous feature, as it still attempts to disambiguate between spelling mistakes and also
       between possible results with the same Damerau-Levenshtein distance.
+      E.g. I enjoyed "Alice in wndrlnd"
+
+      We have added the functionality to extract foreign and/or alternate titles.
+
+      We also added functionality to extract movie titles without requiring quotation marks. This feature
+      also works with the movie disambiguation feature. E.g. I loved Nacho libre
       """
 
 
